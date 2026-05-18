@@ -1,25 +1,32 @@
 # scripts/
 
-Local Python helpers for things the dashboard either can't do or shouldn't do. Three scripts; pick by symptom.
+Local Python helpers. Two flavours:
 
-All three mirror the JavaScript crypto in [`worktrace-app/docs/auth/auth.js`](https://github.com/kjain-Cloudforia/worktrace-app/blob/main/docs/auth/auth.js) exactly — same PBKDF2 (600k iters, HMAC-SHA-256), same AES-GCM-256, same 16-byte salt + 12-byte IV, no AAD. Each script round-trip-verifies what it built before writing it to disk, so a constant drift between Python and JS gets caught locally, not after a failed push.
+- **Routine scripts** that run automatically via the auto-sync routine (you'll never invoke these by hand in normal operation) — `sync_pull.py`, `sync_claude_md.py`.
+- **Bootstrap / break-glass scripts** that admin runs manually for first-time setup or emergency recovery — `build_initial_user_records.py`, `build_recovery_artifacts.py`, `reset_admin.py`.
+
+The crypto-touching scripts mirror the JavaScript crypto in [`worktrace-app/docs/auth/auth.js`](https://github.com/kjain-Cloudforia/worktrace-app/blob/main/docs/auth/auth.js) exactly — same PBKDF2 (600k iters, HMAC-SHA-256), same AES-GCM-256, same 16-byte salt + 12-byte IV, no AAD. Each round-trip-verifies what it built before writing to disk, so any constant-drift between Python and JS gets caught locally.
 
 ## Decision flow
 
 ```
-Need to bootstrap auth from scratch?
-  └─▶ build_initial_user_records.py        (one-off; creates kashish.json + admin.json)
+Routine (runs automatically via the auto-sync routine — no manual invocation):
+  ├─▶ sync_pull.py        — pulls dashboard work_shift → local config.json
+  └─▶ sync_claude_md.py   — injects CLAUDE.shared.md → ~/.claude/CLAUDE.md (between markers)
 
-Need to set up password recovery for the first time, or rotate
-the existing recovery code?
-  └─▶ build_recovery_artifacts.py          (creates admin.recovery.json + every escrow/<u>.json)
+Bootstrap (one-off, admin only):
+  └─▶ build_initial_user_records.py     — creates kashish.json + admin.json from scratch
 
-Admin can't sign in AND lost the recovery code, but the laptop
-still has config.json with the admin PAT?
-  └─▶ reset_admin.py                        (rewrites admin.json under a new password)
+Recovery setup (one-off, admin only):
+  └─▶ build_recovery_artifacts.py       — creates admin.recovery.json + every escrow/<u>.json,
+                                          OR rotates the recovery code (rebuilds all escrows)
+
+Emergency (admin only — when both dashboard + recovery code can't help):
+  └─▶ reset_admin.py                     — rewrites admin.json under a new password,
+                                          using the admin PAT from config.json
 ```
 
-If none of these match: you probably want the **Admin Console** tile in the dashboard. Almost every routine operation (add user, reset user, revoke user, change password, admin self-recovery) is there now. These scripts are for bootstrap + break-glass only.
+If none of these match: you probably want the **Admin Console** tile in the dashboard. Almost every routine operation (add user, reset user, revoke user, change password, admin self-recovery) is there now. These scripts are for bootstrap + break-glass + automation only.
 
 ## Setup (one-time)
 
@@ -32,6 +39,53 @@ python3 -m pip install --user cryptography
 All scripts read from `~/Documents/DevPlatform/config.json` and write into `~/Documents/DevPlatform/auth/` (which must be a clone of [`worktrace-auth`](https://github.com/kjain-Cloudforia/worktrace-auth)).
 
 After any script run, you commit + push from `~/Documents/DevPlatform/auth/` yourself — the scripts never call git, so they can't accidentally cause merge conflicts or auth issues.
+
+---
+
+## `sync_pull.py` (Phase 5k, routine)
+
+**When to run:** automatically by the auto-sync routine on every shift-start. You'll never invoke this by hand in normal operation.
+
+**What it does:**
+1. Reads `platform.user_id` from `~/Documents/DevPlatform/config.json`.
+2. Fetches the user's auth record from `api.github.com/repos/.../worktrace-auth/contents/users/<u>.json`.
+3. Resolves the *effective* `work_shift` (handles Phase 5k's pending-shift logic — if a queued change's `effective_from` has elapsed, the pending shift is the active one).
+4. Writes any changed values (`platform.timezone`, `modules.timesheet.work_hours.start/.end`) back into the local `config.json`. Preserves chmod 600.
+5. Prints `↳ Pulled N changes from dashboard: …` if anything changed, or `↳ config.json already matches dashboard. No changes.` if nothing did.
+
+**Manual use:** safe to run anytime to force a fresh pull. Useful if you edited shift via the dashboard and want it on your laptop immediately rather than waiting for next shift-start.
+
+```bash
+python3 ~/Documents/DevPlatform/scripts/sync_pull.py
+```
+
+**Failure modes (and what to do):** prints to stderr and exits non-zero if the auth record is missing (admin hasn't provisioned), config.json is malformed, or the network is unavailable. The auto-sync routine treats any failure as "don't update .last_synced_at" — next session retries.
+
+---
+
+## `sync_claude_md.py` (Phase 5l, routine)
+
+**When to run:** automatically by the auto-sync routine on every shift-start, AND once during teammate onboarding (the install.sh runs it). You'll rarely invoke it by hand.
+
+**What it does:**
+1. Reads `~/Documents/DevPlatform/CLAUDE.shared.md` — the canonical source of WorkTrace platform rules, tracked in this repo (so admin's edits flow to every teammate via git).
+2. Reads `~/.claude/CLAUDE.md` on this machine.
+3. Replaces everything between
+   ```
+   <!-- BEGIN WORKTRACE RULES (managed by sync_claude_md.py — do not edit) -->
+   <!-- END WORKTRACE RULES -->
+   ```
+   with the current contents of `CLAUDE.shared.md`. Anything outside those markers (your personal rules, stack-specific deploy queries, etc.) is left completely untouched.
+4. If the markers don't exist yet (fresh laptop), appends a managed block to the end of the file. If `~/.claude/CLAUDE.md` doesn't exist at all, creates it with the managed block.
+5. Silent on no-op (when the managed block is already identical to the source). Prints `↳ updated managed block in .claude/CLAUDE.md` when it changed something.
+
+**Manual use:** safe to run anytime. Useful if you just `git pull`ed a `CLAUDE.shared.md` update and want to see it in your `~/.claude/CLAUDE.md` immediately, without waiting for next shift-start.
+
+```bash
+python3 ~/Documents/DevPlatform/scripts/sync_claude_md.py
+```
+
+**Failure modes:** exits 1 if `CLAUDE.shared.md` is missing (worktrace-cli not cloned, or repo is in a weird state). Exits 2 if it can't read/write `~/.claude/CLAUDE.md` (permissions, symlinks). Both rare.
 
 ---
 
