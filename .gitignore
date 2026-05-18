@@ -1,0 +1,50 @@
+# worktrace-cli — files that stay LOCAL on each teammate's laptop.
+#
+# The repo distributes shared code + prompt rules. Per-user content
+# (PATs, the user's actual timesheet, runtime state) never gets committed.
+# Each teammate sets these up locally via the install one-liner.
+
+# ---- Per-user credentials + identity ----
+# Contains GitHub PATs in plaintext (chmod 600). NEVER commit.
+config.json
+
+# ---- Per-user runtime data ----
+# Passive CLI capture log; populated by shell-hook.zsh on each shell.
+cli-log.jsonl
+
+# Marker file used by the auto-sync gate.
+.last_synced_at
+
+# Concurrency lock for dpsync.
+.dpsync.lock
+
+# ---- Per-user canonical timesheet ----
+# The actual work-log content lives only on the user's laptop.
+# Synced to their private worktrace-data-<user> repo, not here.
+modules/timesheet/timesheet.md
+
+# ---- Nested git clones (per-user / admin-only) ----
+# These are clones of OTHER repos that admin keeps inside DevPlatform
+# for convenience. They have their own history; we don't track them.
+# (git doesn't support inline `#` comments on pattern lines, so each
+# pattern lives on its own line below.)
+sync/
+auth/
+app/
+
+# ---- Admin-only state ----
+# Kashish's running state for the platform — paths, decisions, history.
+# Not portable; lives only on the admin's laptop.
+PROJECT_NOTES.md
+
+# Generic backups directory if it exists.
+backups/
+
+# ---- macOS / editor noise ----
+.DS_Store
+*.swp
+.idea/
+.vscode/
+__pycache__/
+*.pyc
+*.pyo
