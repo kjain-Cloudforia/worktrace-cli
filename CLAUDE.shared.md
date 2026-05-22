@@ -70,11 +70,49 @@ Do these every time, no shortcuts:
 2. Identify the project per the user-level CLAUDE.md's stack-specific attribution rules (the platform principle is "tied to an explicit system, not the folder name").
 3. Don't duplicate entries — if an entry for the same work day + project already exists, append bullets to that section instead of creating a new section.
 
-## Auto-sync routine (Phase 5k)
+## Auto-sync routine (Phase 5l — now hook-driven, was Phase 5k)
 
-**On the first user message of every Claude session, BEFORE responding to the user's actual request, run the auto-sync check.** This keeps each teammate's laptop aligned with the dashboard AND with the shared `worktrace-cli` repo (the source of these rules) without anyone having to run scripts manually.
+**As of Phase 5l, the auto-sync + reconstruction gate is enforced by Claude Code hooks, not by the LLM remembering to run a procedure.** Specifically:
 
-The check is gated by `~/Documents/DevPlatform/.last_synced_at`. If today's most-recent shift-start has fired since that timestamp (or the file doesn't exist), the sync runs. Otherwise no-op silently.
+- `~/Documents/DevPlatform/scripts/wt_shift_gate.py` is registered as a `UserPromptSubmit` hook in `~/.claude/settings.json`.
+- It fires on every user prompt, but the body is gated by `.last_synced_at` — so 99% of prompts are silent no-ops.
+- On the **first prompt of any new work shift** (regardless of which session, regardless of how many days a session has been open), the hook runs the sync pipeline + auto-compiles structured evidence for any not-yet-reconstructed completed shifts, and surfaces a notice listing the evidence file paths.
+- `~/Documents/DevPlatform/scripts/claude_bash_hook.py` is registered as a `PostToolUse` hook on Bash. It mirrors the interactive `shell-hook.zsh` logic for non-interactive shells (which is what Claude's Bash tool uses) so deploys/DML Claude runs are captured in `cli-log.jsonl` alongside manual deploys.
+- `~/Documents/DevPlatform/scripts/wt_timesheet_lint.py` is registered as a `PostToolUse` hook on Write/Edit. When `timesheet.md` is edited, it surfaces the per-shift evidence files so the LLM can verify each bullet against deterministic evidence.
+
+**Shift-based, not session-based.** A user might run one session for a week or ten sessions in a day — the gate triggers on shift boundaries, never on "first message of session." Each user's shift comes from their own `config.json` so the gate works correctly across timezones.
+
+**Why the old procedure-in-CLAUDE.md approach failed:** it relied on the LLM remembering to run the gate, which it didn't reliably do in long multi-day sessions or after context summarization. The hook approach removes the LLM from the trigger loop entirely.
+
+### Writing timesheet bullets from compiled evidence
+
+When the shift-gate hook surfaces a notice like `📋 Shifts needing timesheet bullets`, follow this flow:
+
+1. Read the listed evidence file at `~/Documents/DevPlatform/.shift_evidence/<date>.md`. It groups all user messages + tracked CLI commands for that shift's UTC window, attributed to projects via `config.json` `alias_hints`.
+2. **Bullets must cite evidence in that file.** If a piece of work doesn't appear in the evidence stream, it didn't happen in that shift — don't write a bullet for it. This was the failure mode that produced fabricated entries before Phase 5l.
+3. **Messages tagged `[META?]` in the evidence are likely WorkTrace/Claude meta-work** (editing timesheet, configuring hooks, updating memory). Don't include them in client-project bullets. Patterns are configurable in `config.json` `modules.timesheet.meta_work_patterns.keywords`.
+4. After appending bullets, update the reconstruction marker:
+   ```
+   echo '<last-reconstructed-date>' > ~/Documents/DevPlatform/.last_reconstructed_shift
+   ```
+   Then run `python3 ~/Documents/DevPlatform/dpsync.py` to push.
+5. **Always ask before syncing to GitHub** — same as the old procedure.
+
+### In-progress shift convention
+
+The current shift hasn't ended yet, so it can't be "reconstructed" in the same way completed shifts can. Convention:
+
+- The current shift's day-header in `timesheet.md` carries the marker `*(in progress)*` on the line below the header.
+- Bullets are added incrementally during the shift as work lands.
+- When the shift ends (5:00 IST for default config), the next shift's first-prompt hook fires, compiles evidence for the now-completed shift (yesterday's), and the `*(in progress)*` marker is removed by the LLM when it appends the next bullet.
+- This means an in-progress shift's bullets can be edited freely during the shift — they only "lock in" when the shift closes and the hook moves to the next.
+
+### Manual gate operations (for when something goes wrong)
+
+- Force-run the shift gate: `python3 ~/Documents/DevPlatform/scripts/wt_shift_gate.py < /dev/null`
+- Compile evidence for a specific shift: `python3 ~/Documents/DevPlatform/scripts/wt_compile_shift.py YYYY-MM-DD`
+- Reset the sync marker (force next prompt to re-sync): `rm ~/Documents/DevPlatform/.last_synced_at`
+- Reset the reconstruction marker: `rm ~/Documents/DevPlatform/.last_reconstructed_shift`
 
 **The check procedure (run as one Bash command):**
 
