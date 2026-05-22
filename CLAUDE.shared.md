@@ -56,12 +56,20 @@ Do these every time, no shortcuts:
 
 ## When user asks for a status report ("status report", "timesheet", "what did I work on today/yesterday/this week", similar)
 
+**Default scope = current ISO week** (Monday → Sunday containing today, computed in the user's timezone from `config.json`). Mirrors the dashboard's default week view. Honor explicit narrower / wider phrasing when the user uses it:
+- `"today"` / `"this shift"` → just today's shift window
+- `"yesterday"` → just yesterday's shift window
+- `"this week"` → same as the default (current ISO week)
+- `"last week"` → the previous ISO week
+- `"this month"` / `"all time"` / `"everything"` → expand to that scope
+- bare `"status report"` / `"timesheet"` / `"what did I work on"` → default (current week)
+
 1. Read `~/Documents/DevPlatform/modules/timesheet/timesheet.md`.
 2. Cross-reference with what was actually done in this session AND with prior-day session JSONLs at `~/.claude/projects/*/*.jsonl`. Filter session files whose `mtime` falls inside the target shift window(s). Parse each candidate session with Python: read events where `type == 'user'` and content is text (not a `tool_result` string starting with `<`) to reconstruct what was worked on. The session's project is its parent-directory name (encoded path); resolve to a friendly name via `~/Documents/DevPlatform/config.json` `project_detection` (org-based / stack-specific attribution — see user-level CLAUDE.md for the stack rules).
 3. Cross-reference with `~/Documents/DevPlatform/cli-log.jsonl` — filter events whose `ts` falls inside the relevant shift window(s); group by `project`. This surfaces deploys/DML the user ran outside any Claude session.
 4. Bucket entries by the shift boundaries above.
-5. Present a **consolidated report across all projects** — even if invoked from one project's workspace.
-6. **AUTO-APPEND any reconstructed-but-unlogged work-day entries to `~/Documents/DevPlatform/modules/timesheet/timesheet.md`** — do NOT just offer. Idempotent: if a `### Day N — <Weekday> YYYY-MM-DD ...` header already exists for that work day, append bullets under existing project sub-headers (or add new project sub-headers) instead of creating a duplicate day section. For days with **no** session/cli-log evidence, leave a short placeholder line asking the user to confirm if anything happened — don't fabricate.
+5. Present a **consolidated report across all projects** — even if invoked from one project's workspace — **scoped to the window resolved above**. For the default (current week), show only Monday-through-today of this week; don't dump older shifts unless the user asked.
+6. **AUTO-APPEND any reconstructed-but-unlogged work-day entries to `~/Documents/DevPlatform/modules/timesheet/timesheet.md`** — do NOT just offer. **The auto-append is scope-agnostic** — even if the report only displays the current week, append entries for any shift that has session/CLI evidence but no entry yet (we never want to silently drop logged work). Idempotent: if a `### Day N — <Weekday> YYYY-MM-DD ...` header already exists for that work day, append bullets under existing project sub-headers (or add new project sub-headers) instead of creating a duplicate day section. For days with **no** session/cli-log evidence, leave a short placeholder line asking the user to confirm if anything happened — don't fabricate.
 7. **ALWAYS ask the user whether to sync to GitHub.** Non-negotiable. After showing the report and the auto-append, call `AskUserQuestion` with a single Yes/No question: *"Sync this to GitHub now? Runs `dpsync.py` — pushes the latest `timesheet.md` to your data repo so the dashboard reflects it."* If Yes → run `python3 ~/Documents/DevPlatform/dpsync.py`. If No → do nothing; local stays updated, GitHub stays at last push. Ask must happen even if no reconstructions were appended (the user may have manually edited the file). **ALWAYS ASK.**
 
 ## When user asks to "log today's work" / "save to timesheet" / similar
