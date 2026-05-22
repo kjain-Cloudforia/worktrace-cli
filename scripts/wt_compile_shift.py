@@ -36,14 +36,27 @@ CLI_LOG = DP / "cli-log.jsonl"
 EVIDENCE_DIR = DP / ".shift_evidence"
 CLAUDE_PROJECTS = Path.home() / ".claude" / "projects"
 
+DEFAULT_META_KEYWORDS = [
+    "timesheet", "worktrace", "dpsync", ".claude/", "claude.md",
+    "settings.json", "hook", "sync_claude_md", "sync_pull",
+    "wt_compile_shift", "wt_shift_gate", "wt_timesheet_lint",
+    "onboarding script", "teammate",
+]
+
+
 def buildMetaPattern(config: dict):
-    """Build the META-keyword regex from config.json's keyword list."""
+    """Build the META-keyword regex from config (with fallback defaults).
+
+    config.json is per-user (gitignored), so teammates without explicit
+    keyword config still get sensible META-tagging via DEFAULT_META_KEYWORDS.
+    Anything in config.json overrides the defaults entirely.
+    """
     metaPatterns = (
         config.get("modules", {})
         .get("timesheet", {})
         .get("meta_work_patterns", {})
     )
-    keywordList = metaPatterns.get("keywords", [])
+    keywordList = metaPatterns.get("keywords") or DEFAULT_META_KEYWORDS
     if not keywordList:
         return None
     escapedKeywords = [re.escape(kw) for kw in keywordList]
