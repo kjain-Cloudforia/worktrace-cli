@@ -101,10 +101,13 @@ def first_sentence(text: str) -> str:
     return text[:200].strip()
 
 
-def make_headline(bullets: list, max_chars: int = 500) -> str:
+def make_headline(bullets: list) -> str:
     """
     Phase 1 headline policy: take the first sentence of each bullet and join
-    with ' · ', then truncate. Phase 2 can swap in LLM-summarized headlines.
+    with ' · '. No length cap — the dashboard splits the headline back into
+    a vertical bullet list and trims naturally per-point. Truncating the
+    joined string lopped off the last bullet's first-sentence with an
+    ellipsis, which read like a bug on the rendered list.
     """
     sentences = []
     for b in bullets:
@@ -112,8 +115,6 @@ def make_headline(bullets: list, max_chars: int = 500) -> str:
         if s:
             sentences.append(s)
     headline = " · ".join(sentences)
-    if len(headline) > max_chars:
-        headline = headline[: max_chars - 1].rstrip() + "…"
     return headline or "(no headline)"
 
 
