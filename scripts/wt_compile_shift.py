@@ -292,8 +292,10 @@ def main():
                         continue
                     outFh.write(
                         f"- **{meetingStartLocal}–{meetingEndLocal}** ({meeting['minutes']}m) "
-                        f"{meeting['title']} — {meeting['attendee_count']} other(s): "
-                        f"{', '.join(meeting['attendee_domains']) or 'n/a'}{organizerNote}{responseNote}"
+                        f"{meeting['title']} — "
+                        + (f"{meeting['attendee_count']} other(s): {', '.join(meeting['attendee_domains']) or 'n/a'}"
+                           if meeting['attendee_count'] else "personal calendar block (no guests)")
+                        + f"{organizerNote}{responseNote}"
                         f" → **{meeting['project']}** ({meeting['project_reason']})"
                         f"{' [recurring]' if meeting['recurring'] else ''}\n"
                     )

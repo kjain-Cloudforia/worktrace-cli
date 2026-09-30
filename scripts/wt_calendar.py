@@ -245,9 +245,8 @@ def fetchCalendarMeetings(startUtc: datetime, endUtc: datetime) -> Optional[list
     Raises on network/API errors — caller decides how to surface them.
 
     Never returned at all (not meetings): all-day entries, focus time / OOO /
-    working-location blocks, cancelled events. Events with no other attendee on
-    the invite count only when their title matches a project; otherwise they're
-    returned with excluded_reason "No other attendees on the invite".
+    working-location blocks, cancelled events. Personal blocks with no other
+    attendee DO count (attendee_count 0) — the user adds them to log meetings.
     """
     accessToken = getAccessToken()
     if accessToken is None:
@@ -304,11 +303,9 @@ def fetchCalendarMeetings(startUtc: datetime, endUtc: datetime) -> Optional[list
             excludedReason = "On your skip list"
         elif responseStatus == "declined":
             excludedReason = "Declined"
-        elif not otherAttendeeList and meetingProject == UNASSIGNED_PROJECT:
-            # No guests on the invite (e.g. "Kashish/Amrita" created without adding
-            # Amrita). Counts only when the title names a project; otherwise it's
-            # likely a personal block — shown greyed, kept out of the timesheet.
-            excludedReason = "No other attendees on the invite"
+        # Personal blocks (no guests) count as meetings on purpose: the user logs
+        # Slack huddles / calls by adding a block to their own calendar. Blocks
+        # that are never meetings belong on the skip list.
         meetingList.append({
             "event_id": calendarEvent.get("id", ""),
             "source": "google",
