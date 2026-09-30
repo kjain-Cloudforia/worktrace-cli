@@ -42,6 +42,21 @@ HTTP_TIMEOUT_SECONDS = 15
 NON_MEETING_EVENT_TYPE_SET = {"focusTime", "outOfOffice", "workingLocation", "birthday"}
 
 
+def loadExcludedTitleKeywordList() -> list:
+    """Per-user skip list: config.json modules.timesheet.calendar.exclude_title_keywords.
+
+    Case-insensitive substring match on the event title — for recurring invites
+    the user never attends, or "reminder" events that aren't real meetings.
+    """
+    try:
+        configMap = json.loads((DP / "config.json").read_text())
+    except Exception:
+        return []
+    keywordList = (configMap.get("modules", {}).get("timesheet", {})
+                   .get("calendar", {}).get("exclude_title_keywords", []))
+    return [keyword.lower() for keyword in keywordList if keyword]
+
+
 def loadClientConfig() -> dict:
     clientJson = json.loads(CLIENT_FILE.read_text())
     return clientJson.get("installed") or clientJson.get("web") or {}
@@ -167,7 +182,8 @@ def fetchShiftMeetings(startUtc: datetime, endUtc: datetime) -> Optional[list]:
 
     Kept: timed events with at least one other attendee that the user did not
     decline. Dropped: all-day entries, focus time / OOO / working-location
-    blocks, cancelled events, solo blocks, declined invites.
+    blocks, cancelled events, solo blocks, declined invites, and titles on the
+    user's exclude_title_keywords list.
     """
     accessToken = getAccessToken()
     if accessToken is None:
@@ -195,8 +211,12 @@ def fetchShiftMeetings(startUtc: datetime, endUtc: datetime) -> Optional[list]:
         if not pageToken:
             break
 
+    excludedTitleKeywordList = loadExcludedTitleKeywordList()
     meetingList = []
     for calendarEvent in rawEventList:
+        eventTitleLower = calendarEvent.get("summary", "").lower()
+        if any(keyword in eventTitleLower for keyword in excludedTitleKeywordList):
+            continue  # user's personal skip list
         if calendarEvent.get("status") == "cancelled":
             continue
         if calendarEvent.get("eventType", "default") in NON_MEETING_EVENT_TYPE_SET:
