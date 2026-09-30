@@ -233,16 +233,16 @@ def parseEventTime(eventTimeMap: dict) -> datetime:
     return datetime.fromisoformat(eventTimeMap["dateTime"].replace("Z", "+00:00"))
 
 
-def fetchShiftMeetings(startUtc: datetime, endUtc: datetime) -> Optional[list]:
-    """Meetings on the primary calendar overlapping [startUtc, endUtc].
+def fetchCalendarMeetings(startUtc: datetime, endUtc: datetime) -> Optional[list]:
+    """Every meeting-like event on the primary calendar overlapping [startUtc, endUtc],
+    including ones the timesheet leaves out — those carry an `excluded_reason`
+    ("Declined" / "On your skip list") instead of None.
 
     Returns None when calendar access isn't set up (caller skips the section).
     Raises on network/API errors — caller decides how to surface them.
 
-    Kept: timed events with at least one other attendee that the user did not
-    decline. Dropped: all-day entries, focus time / OOO / working-location
-    blocks, cancelled events, solo blocks, declined invites, and titles on the
-    user's exclude_title_keywords list.
+    Never returned at all (not meetings): all-day entries, focus time / OOO /
+    working-location blocks, cancelled events, solo blocks with no other attendee.
     """
     accessToken = getAccessToken()
     if accessToken is None:
@@ -274,9 +274,6 @@ def fetchShiftMeetings(startUtc: datetime, endUtc: datetime) -> Optional[list]:
     configMap = loadConfigMap()
     meetingList = []
     for calendarEvent in rawEventList:
-        eventTitleLower = calendarEvent.get("summary", "").lower()
-        if any(keyword in eventTitleLower for keyword in excludedTitleKeywordList):
-            continue  # user's personal skip list
         if calendarEvent.get("status") == "cancelled":
             continue
         if calendarEvent.get("eventType", "default") in NON_MEETING_EVENT_TYPE_SET:
@@ -291,16 +288,22 @@ def fetchShiftMeetings(startUtc: datetime, endUtc: datetime) -> Optional[list]:
         if not otherAttendeeList:
             continue  # solo block, not a meeting
         responseStatus = selfAttendee.get("responseStatus") if selfAttendee else "accepted"
-        if responseStatus == "declined":
-            continue
+
+        meetingTitle = calendarEvent.get("summary", "(no title)")
+        excludedReason = None
+        if any(keyword in meetingTitle.lower() for keyword in excludedTitleKeywordList):
+            excludedReason = "On your skip list"
+        elif responseStatus == "declined":
+            excludedReason = "Declined"
 
         eventStart = parseEventTime(calendarEvent["start"])
         eventEnd = parseEventTime(calendarEvent["end"])
         attendeeDomainSet = {attendee["email"].split("@")[-1].lower()
                              for attendee in otherAttendeeList if "@" in attendee.get("email", "")}
-        meetingTitle = calendarEvent.get("summary", "(no title)")
         meetingProject, projectReason = resolveMeetingProject(meetingTitle, attendeeDomainSet, configMap)
         meetingList.append({
+            "event_id": calendarEvent.get("id", ""),
+            "excluded_reason": excludedReason,
             "project": meetingProject,
             "project_reason": projectReason,
             "recurring": bool(calendarEvent.get("recurringEventId")),
@@ -314,6 +317,15 @@ def fetchShiftMeetings(startUtc: datetime, endUtc: datetime) -> Optional[list]:
             "attendee_domains": sorted(attendeeDomainSet),
         })
     return meetingList
+
+
+def fetchShiftMeetings(startUtc: datetime, endUtc: datetime) -> Optional[list]:
+    """Meetings that belong in the timesheet: fetchCalendarMeetings minus
+    declined invites and the user's exclude_title_keywords skip list."""
+    meetingList = fetchCalendarMeetings(startUtc, endUtc)
+    if meetingList is None:
+        return None
+    return [meeting for meeting in meetingList if not meeting["excluded_reason"]]
 
 
 def main():
