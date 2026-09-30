@@ -14,6 +14,9 @@ One-time setup per laptop:
 Usage:
   wt_calendar.py auth                 # one-time browser consent
   wt_calendar.py list YYYY-MM-DD      # print meetings for that shift (debug)
+  wt_calendar.py map "<title keyword>" <Project|Internal>   # remember a meeting's project
+  wt_calendar.py map-domain <client.com> <Project>          # attendee domain → project
+  wt_calendar.py skip "<title keyword>"                     # never log this meeting
 
 If either secrets file is missing, fetchShiftMeetings() returns None and the
 evidence compile simply skips the Meetings section — teammates who never set
@@ -42,19 +45,75 @@ HTTP_TIMEOUT_SECONDS = 15
 NON_MEETING_EVENT_TYPE_SET = {"focusTime", "outOfOffice", "workingLocation", "birthday"}
 
 
-def loadExcludedTitleKeywordList() -> list:
-    """Per-user skip list: config.json modules.timesheet.calendar.exclude_title_keywords.
+CONFIG_FILE = DP / "config.json"
+INTERNAL_PROJECT = "Internal"
+UNASSIGNED_PROJECT = "UNASSIGNED"
 
-    Case-insensitive substring match on the event title — for recurring invites
-    the user never attends, or "reminder" events that aren't real meetings.
-    """
+
+def loadConfigMap() -> dict:
     try:
-        configMap = json.loads((DP / "config.json").read_text())
+        return json.loads(CONFIG_FILE.read_text())
     except Exception:
-        return []
-    keywordList = (configMap.get("modules", {}).get("timesheet", {})
-                   .get("calendar", {}).get("exclude_title_keywords", []))
+        return {}
+
+
+def calendarSettingsOf(configMap: dict) -> dict:
+    """config.json modules.timesheet.calendar — per-user, never synced:
+      exclude_title_keywords   : [keyword]          meetings to drop entirely
+      title_keyword_to_project : {keyword: project}  learned / user-given mappings
+      domain_to_project        : {domain: project}   client attendee domains
+    Keyword matching is case-insensitive substring on the event title.
+    """
+    return configMap.get("modules", {}).get("timesheet", {}).get("calendar", {})
+
+
+def loadExcludedTitleKeywordList() -> list:
+    keywordList = calendarSettingsOf(loadConfigMap()).get("exclude_title_keywords", [])
     return [keyword.lower() for keyword in keywordList if keyword]
+
+
+def knownProjectNameList(configMap: dict) -> list:
+    projectDetectionMap = configMap.get("project_detection", {})
+    projectNameSet = set(projectDetectionMap.get("org_id_to_project", {}).values())
+    projectNameSet |= set(projectDetectionMap.get("company_to_project", {}).values())
+    return sorted(projectNameSet)
+
+
+def resolveMeetingProject(meetingTitle: str, attendeeDomainSet: set, configMap: dict):
+    """Return (project, reason). Order: user's keyword map (longest keyword wins)
+    → project name in title → client attendee domain → UNASSIGNED (ask the user)."""
+    calendarSettings = calendarSettingsOf(configMap)
+    titleLower = meetingTitle.lower()
+
+    keywordVsProjectMap = {keyword.lower(): projectName for keyword, projectName
+                           in calendarSettings.get("title_keyword_to_project", {}).items() if keyword}
+    for projectName in knownProjectNameList(configMap):
+        keywordVsProjectMap.setdefault(projectName.lower(), projectName)
+    for keyword in sorted(keywordVsProjectMap, key=len, reverse=True):
+        if keyword in titleLower:
+            return keywordVsProjectMap[keyword], f'title has "{keyword}"'
+
+    domainVsProjectMap = {domain.lower(): projectName for domain, projectName
+                          in calendarSettings.get("domain_to_project", {}).items()}
+    for attendeeDomain in sorted(attendeeDomainSet):
+        if attendeeDomain in domainVsProjectMap:
+            return domainVsProjectMap[attendeeDomain], f"attendee from {attendeeDomain}"
+
+    return UNASSIGNED_PROJECT, "no match"
+
+
+def saveCalendarSetting(settingKey: str, entryKey: str, entryValue=None):
+    """Persist a keyword mapping (dict setting) or skip keyword (list setting)."""
+    configMap = json.loads(CONFIG_FILE.read_text())
+    calendarSettings = (configMap.setdefault("modules", {}).setdefault("timesheet", {})
+                        .setdefault("calendar", {}))
+    if entryValue is None:
+        keywordList = calendarSettings.setdefault(settingKey, [])
+        if entryKey not in keywordList:
+            keywordList.append(entryKey)
+    else:
+        calendarSettings.setdefault(settingKey, {})[entryKey] = entryValue
+    CONFIG_FILE.write_text(json.dumps(configMap, indent=2) + "\n")
 
 
 def loadClientConfig() -> dict:
@@ -212,6 +271,7 @@ def fetchShiftMeetings(startUtc: datetime, endUtc: datetime) -> Optional[list]:
             break
 
     excludedTitleKeywordList = loadExcludedTitleKeywordList()
+    configMap = loadConfigMap()
     meetingList = []
     for calendarEvent in rawEventList:
         eventTitleLower = calendarEvent.get("summary", "").lower()
@@ -238,11 +298,16 @@ def fetchShiftMeetings(startUtc: datetime, endUtc: datetime) -> Optional[list]:
         eventEnd = parseEventTime(calendarEvent["end"])
         attendeeDomainSet = {attendee["email"].split("@")[-1].lower()
                              for attendee in otherAttendeeList if "@" in attendee.get("email", "")}
+        meetingTitle = calendarEvent.get("summary", "(no title)")
+        meetingProject, projectReason = resolveMeetingProject(meetingTitle, attendeeDomainSet, configMap)
         meetingList.append({
+            "project": meetingProject,
+            "project_reason": projectReason,
+            "recurring": bool(calendarEvent.get("recurringEventId")),
             "start": eventStart,
             "end": eventEnd,
             "minutes": int((eventEnd - eventStart).total_seconds() // 60),
-            "title": calendarEvent.get("summary", "(no title)"),
+            "title": meetingTitle,
             "response": responseStatus,
             "organizer_is_self": bool(calendarEvent.get("organizer", {}).get("self")),
             "attendee_count": len(otherAttendeeList),
@@ -271,7 +336,21 @@ def main():
             print(f"  {meeting['start'].astimezone(userTimezone):%H:%M}–"
                   f"{meeting['end'].astimezone(userTimezone):%H:%M} ({meeting['minutes']}m) "
                   f"{meeting['title']} [{meeting['response']}, "
-                  f"{meeting['attendee_count']} others: {', '.join(meeting['attendee_domains'])}]")
+                  f"{meeting['attendee_count']} others: {', '.join(meeting['attendee_domains'])}]"
+                  f" → {meeting['project']} ({meeting['project_reason']})"
+                  f"{' [recurring]' if meeting['recurring'] else ''}")
+        return
+    if len(sys.argv) == 4 and sys.argv[1] == "map":
+        saveCalendarSetting("title_keyword_to_project", sys.argv[2], sys.argv[3])
+        print(f'✓ Meetings with "{sys.argv[2]}" in the title → {sys.argv[3]}')
+        return
+    if len(sys.argv) == 4 and sys.argv[1] == "map-domain":
+        saveCalendarSetting("domain_to_project", sys.argv[2].lower(), sys.argv[3])
+        print(f"✓ Meetings with attendees from {sys.argv[2]} → {sys.argv[3]}")
+        return
+    if len(sys.argv) == 3 and sys.argv[1] == "skip":
+        saveCalendarSetting("exclude_title_keywords", sys.argv[2])
+        print(f'✓ Meetings with "{sys.argv[2]}" in the title will be skipped')
         return
     print(__doc__)
 

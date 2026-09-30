@@ -272,9 +272,10 @@ def main():
             else:
                 outFh.write(
                     "_Accepted/organized meetings with other attendees (declined, "
-                    "solo, all-day, focus/OOO blocks excluded). Attribute each to a "
-                    "project by title / attendee domain; internal-only meetings with "
-                    "no clear project go on the day's `Internal meetings:` line._\n\n"
+                    "solo, all-day, focus/OOO blocks and the user's skip list excluded). "
+                    "`→ Project` is auto-matched from title keywords / attendee domain. "
+                    "**UNASSIGNED meetings: ask the user which project each belongs to "
+                    "before writing bullets** (see Meetings rule in CLAUDE.shared.md)._\n\n"
                 )
                 for meeting in meetingList:
                     meetingStartLocal = meeting["start"].astimezone(userTimezone).strftime("%H:%M")
@@ -284,7 +285,9 @@ def main():
                     outFh.write(
                         f"- **{meetingStartLocal}–{meetingEndLocal}** ({meeting['minutes']}m) "
                         f"{meeting['title']} — {meeting['attendee_count']} other(s): "
-                        f"{', '.join(meeting['attendee_domains']) or 'n/a'}{organizerNote}{responseNote}\n"
+                        f"{', '.join(meeting['attendee_domains']) or 'n/a'}{organizerNote}{responseNote}"
+                        f" → **{meeting['project']}** ({meeting['project_reason']})"
+                        f"{' [recurring]' if meeting['recurring'] else ''}\n"
                     )
                 outFh.write("\n")
 

@@ -166,7 +166,7 @@ Meetings from your Google Calendar can be added to each shift's evidence automat
 4. `python3 ~/Documents/DevPlatform/scripts/wt_calendar.py auth` → approve in the browser.
 5. Check: `python3 ~/Documents/DevPlatform/scripts/wt_calendar.py list <YYYY-MM-DD>`.
 
-To skip meetings you never attend (or reminder-only invites), add title keywords to `config.json` → `modules.timesheet.calendar.exclude_title_keywords` (case-insensitive substring match).
+Meetings are auto-matched to a project by title (project name or your keywords) or client attendee domain; unmatched ones are asked about at timesheet sync, and recurring answers are remembered. Manage it with `wt_calendar.py map "<title keyword>" <Project|Internal>`, `map-domain <client.com> <Project>`, `skip "<title keyword>"` (stored in your local `config.json` → `modules.timesheet.calendar`).
 
 No billing account needed. `.secrets/` is gitignored. Skip this and nothing changes — the evidence compile just omits the Meetings section.
 
