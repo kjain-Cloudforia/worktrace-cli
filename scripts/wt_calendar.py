@@ -34,6 +34,9 @@ DP = Path.home() / "Documents" / "DevPlatform"
 SECRETS_DIR = DP / ".secrets"
 CLIENT_FILE = SECRETS_DIR / "google_client.json"
 TOKEN_FILE = SECRETS_DIR / "google_token.json"
+# Meetings the user adds by hand in the dashboard Calendar module (Slack huddles,
+# calls, …). Written by the browser into the data repo; pulled down by dpsync.
+MANUAL_MEETINGS_FILE = DP / "sync" / "modules" / "calendar" / "manual.json"
 
 SCOPE = "https://www.googleapis.com/auth/calendar.events.readonly"
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -303,6 +306,7 @@ def fetchCalendarMeetings(startUtc: datetime, endUtc: datetime) -> Optional[list
         meetingProject, projectReason = resolveMeetingProject(meetingTitle, attendeeDomainSet, configMap)
         meetingList.append({
             "event_id": calendarEvent.get("id", ""),
+            "source": "google",
             "excluded_reason": excludedReason,
             "project": meetingProject,
             "project_reason": projectReason,
@@ -319,13 +323,54 @@ def fetchCalendarMeetings(startUtc: datetime, endUtc: datetime) -> Optional[list
     return meetingList
 
 
+def loadManualMeetings(startUtc: datetime, endUtc: datetime) -> list:
+    """Dashboard-added meetings overlapping [startUtc, endUtc], in the same shape
+    as fetchCalendarMeetings entries (source="manual", project already chosen)."""
+    try:
+        manualMeetingRecordList = json.loads(MANUAL_MEETINGS_FILE.read_text()).get("meetings", [])
+    except (OSError, ValueError):
+        return []
+    meetingList = []
+    for manualMeetingRecord in manualMeetingRecordList:
+        try:
+            meetingStart = datetime.fromisoformat(manualMeetingRecord["start"].replace("Z", "+00:00"))
+            meetingEnd = datetime.fromisoformat(manualMeetingRecord["end"].replace("Z", "+00:00"))
+        except (KeyError, ValueError):
+            continue
+        if meetingEnd <= startUtc or meetingStart >= endUtc:
+            continue
+        meetingMedium = manualMeetingRecord.get("medium") or "Other"
+        meetingList.append({
+            "event_id": manualMeetingRecord.get("id", ""),
+            "source": "manual",
+            "medium": meetingMedium,
+            "notes": manualMeetingRecord.get("notes", ""),
+            "excluded_reason": None,
+            "project": manualMeetingRecord.get("project") or UNASSIGNED_PROJECT,
+            "project_reason": f"added by you ({meetingMedium})",
+            "recurring": False,
+            "start": meetingStart,
+            "end": meetingEnd,
+            "minutes": int((meetingEnd - meetingStart).total_seconds() // 60),
+            "title": manualMeetingRecord.get("title") or "(no title)",
+            "response": "accepted",
+            "organizer_is_self": True,
+            "attendee_count": 0,
+            "attendee_domains": [],
+        })
+    return meetingList
+
+
 def fetchShiftMeetings(startUtc: datetime, endUtc: datetime) -> Optional[list]:
-    """Meetings that belong in the timesheet: fetchCalendarMeetings minus
-    declined invites and the user's exclude_title_keywords skip list."""
-    meetingList = fetchCalendarMeetings(startUtc, endUtc)
-    if meetingList is None:
+    """Meetings that belong in the timesheet: Google meetings minus declined
+    invites and the user's skip list, plus meetings added by hand in the
+    dashboard. None only when there is neither calendar access nor any manual one."""
+    googleMeetingList = fetchCalendarMeetings(startUtc, endUtc)
+    manualMeetingList = loadManualMeetings(startUtc, endUtc)
+    if googleMeetingList is None and not manualMeetingList:
         return None
-    return [meeting for meeting in meetingList if not meeting["excluded_reason"]]
+    meetingList = [meeting for meeting in (googleMeetingList or []) if not meeting["excluded_reason"]]
+    return sorted(meetingList + manualMeetingList, key=lambda meeting: meeting["start"])
 
 
 def main():

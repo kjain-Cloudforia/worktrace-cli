@@ -205,6 +205,26 @@ def main() -> None:
             f"but compiler is not available."
         )
 
+    # Dashboard-added meetings (Calendar module → manual.json) whose work day is
+    # already logged but that aren't on it yet. dpsync above pulled manual.json.
+    calendarSyncPath = DP / "modules" / "calendar" / "sync.py"
+    if calendarSyncPath.exists():
+        try:
+            unloggedResult = subprocess.run(
+                ["python3", str(calendarSyncPath), "--unlogged-manual"],
+                capture_output=True, text=True, timeout=30,
+            )
+            unloggedLineList = [line for line in unloggedResult.stdout.splitlines() if line.strip()]
+        except Exception:
+            unloggedLineList = []
+        if unloggedLineList:
+            statusLines.append("")
+            statusLines.append(
+                "🗓 Meetings added in the dashboard for days already in the timesheet — add each "
+                "as a `Meetings:` line (exact title) under its project on that day, then sync:"
+            )
+            statusLines.extend(f"  • {line}" for line in unloggedLineList)
+
     print("\n".join(statusLines))
 
 

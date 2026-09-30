@@ -21,6 +21,9 @@ Every entry carries a status:
     pending   — the work day isn't logged yet (current shift); `project` is
                 the auto-matched suggestion or null
 
+Meetings the user adds by hand in the dashboard (sync/modules/calendar/manual.json,
+written by the browser, never by this script) are merged in with source="manual".
+
 Enable per laptop in config.json:
     "modules": { "calendar": { "enabled": true, "start_date": "YYYY-MM-DD" } }
 Needs `python3 scripts/wt_calendar.py auth` to have been run once.
@@ -42,7 +45,8 @@ OUTPUT_PATH = DP_DIR / "sync" / "modules" / "calendar" / "data.json"
 
 sys.path.insert(0, str(DP_DIR / "scripts"))
 sys.path.insert(0, str(DP_DIR / "modules" / "timesheet"))
-from wt_calendar import fetchCalendarMeetings, INTERNAL_PROJECT, UNASSIGNED_PROJECT  # noqa: E402
+from wt_calendar import (fetchCalendarMeetings, loadManualMeetings,  # noqa: E402
+                         INTERNAL_PROJECT, UNASSIGNED_PROJECT)
 from parser import parse_timesheet  # noqa: E402
 
 RE_MEETING_BULLET = re.compile(r"^\s*(internal\s+)?meetings\s*:", re.IGNORECASE)
@@ -115,6 +119,9 @@ def buildPayload(configMap: dict, meetingList: list, timesheetText: str,
             meetingStatus, statusReason, meetingProject = "logged", None, loggedProject
         elif meeting["excluded_reason"]:
             meetingStatus, statusReason, meetingProject = "excluded", meeting["excluded_reason"], suggestedProject
+        elif workDate in loggedWorkDateSet and meeting.get("source") == "manual":
+            meetingStatus, meetingProject = "missing", suggestedProject
+            statusReason = "Added after this day was logged — goes in at the next timesheet sync"
         elif workDate in loggedWorkDateSet:
             meetingStatus, statusReason, meetingProject = "missing", "Not on this day's timesheet", suggestedProject
         else:
@@ -123,13 +130,16 @@ def buildPayload(configMap: dict, meetingList: list, timesheetText: str,
                             if suggestedProject else "Shift not logged yet — project to be confirmed")
 
         entryList.append({
-            "id": "sha256:" + hashlib.sha256(
+            "id": meeting["event_id"] if meeting.get("source") == "manual" else "sha256:" + hashlib.sha256(
                 (meeting["event_id"] + meeting["start"].isoformat()).encode()).hexdigest()[:16],
             "work_date": workDate,
             "start": meeting["start"].astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "end": meeting["end"].astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "minutes": meeting["minutes"],
             "title": meeting["title"],
+            "source": meeting.get("source", "google"),
+            "medium": meeting.get("medium"),
+            "notes": meeting.get("notes") or None,
             "project": meetingProject,
             "status": meetingStatus,
             "reason": statusReason,
@@ -147,10 +157,41 @@ def buildPayload(configMap: dict, meetingList: list, timesheetText: str,
         "display_name": platformMap.get("display_name", ""),
         "timezone": platformMap.get("timezone", ""),
         "work_shift": {"start": workHoursMap["start"], "end": workHoursMap["end"]},
+        "projects": knownProjectList(configMap),
         "range": {"start_date": rangeStartDate,
                   "end": rangeEndUtc.strftime("%Y-%m-%dT%H:%M:%SZ")},
         "entries": entryList,
     }
+
+
+def knownProjectList(configMap: dict) -> list:
+    """Project choices for the dashboard's Add-meeting form: friendly names
+    from project_detection, plus Internal."""
+    projectDetectionMap = configMap.get("project_detection", {})
+    projectNameSet = set(projectDetectionMap.get("org_id_to_project", {}).values())
+    projectNameSet |= set(projectDetectionMap.get("company_to_project", {}).values())
+    return sorted(projectNameSet) + [INTERNAL_PROJECT]
+
+
+def listUnloggedManualMeetings(configMap: dict) -> int:
+    """Print dashboard-added meetings whose work day is already in the timesheet
+    but that aren't on it yet — the shift gate surfaces these so they get added."""
+    manualMeetingList = loadManualMeetings(datetime(2000, 1, 1, tzinfo=timezone.utc),
+                                           datetime(2100, 1, 1, tzinfo=timezone.utc))
+    timesheetText = TIMESHEET_PATH.read_text() if TIMESHEET_PATH.exists() else ""
+    payloadMap = buildPayload(configMap, manualMeetingList, timesheetText, "2000-01-01",
+                              datetime.now(timezone.utc))
+    userTimezone = ZoneInfo(configMap["platform"].get("timezone") or "UTC")
+    for calendarEntry in payloadMap["entries"]:
+        if calendarEntry["status"] != "missing":
+            continue
+        entryStartLocal = datetime.fromisoformat(calendarEntry["start"].replace("Z", "+00:00")).astimezone(userTimezone)
+        entryEndLocal = datetime.fromisoformat(calendarEntry["end"].replace("Z", "+00:00")).astimezone(userTimezone)
+        notesNote = f" — notes: {calendarEntry['notes']}" if calendarEntry.get("notes") else ""
+        print(f"{calendarEntry['work_date']} {entryStartLocal:%H:%M}–{entryEndLocal:%H:%M} "
+              f"({calendarEntry['minutes']}m) {calendarEntry['title']} [{calendarEntry['medium']}] "
+              f"→ {calendarEntry['project']}{notesNote}")
+    return 0
 
 
 def contentHash(payloadMap: dict) -> str:
@@ -178,9 +219,13 @@ def main() -> int:
                     "against timesheet.md, written into sync/.")
     argumentParser.add_argument("--dry-run", action="store_true",
                                 help="Print the JSON to stdout instead of writing to disk.")
+    argumentParser.add_argument("--unlogged-manual", action="store_true",
+                                help="List dashboard-added meetings missing from already-logged days.")
     parsedArguments = argumentParser.parse_args()
 
     configMap = json.loads(CONFIG_PATH.read_text())
+    if parsedArguments.unlogged_manual:
+        return listUnloggedManualMeetings(configMap)
     calendarModuleConfig = configMap.get("modules", {}).get("calendar", {})
     if not calendarModuleConfig.get("enabled"):
         log("Calendar module disabled in config.json — nothing to do.")
@@ -205,6 +250,7 @@ def main() -> int:
     if meetingList is None:
         log("⚠ calendar not connected — run: python3 scripts/wt_calendar.py auth")
         meetingList = []
+    meetingList = meetingList + loadManualMeetings(rangeStartUtc, rangeEndUtc)
 
     timesheetText = TIMESHEET_PATH.read_text() if TIMESHEET_PATH.exists() else ""
     payloadMap = buildPayload(configMap, meetingList, timesheetText, rangeStartDate, rangeEndUtc)

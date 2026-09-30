@@ -282,6 +282,14 @@ def main():
                     meetingEndLocal = meeting["end"].astimezone(userTimezone).strftime("%H:%M")
                     responseNote = "" if meeting["response"] == "accepted" else f", RSVP: {meeting['response']}"
                     organizerNote = ", organizer" if meeting["organizer_is_self"] else ""
+                    if meeting.get("source") == "manual":
+                        notesNote = f" — notes: {meeting['notes']}" if meeting.get("notes") else ""
+                        outFh.write(
+                            f"- **{meetingStartLocal}–{meetingEndLocal}** ({meeting['minutes']}m) "
+                            f"{meeting['title']} — added by the user in the dashboard ({meeting['medium']})"
+                            f"{notesNote} → **{meeting['project']}**\n"
+                        )
+                        continue
                     outFh.write(
                         f"- **{meetingStartLocal}–{meetingEndLocal}** ({meeting['minutes']}m) "
                         f"{meeting['title']} — {meeting['attendee_count']} other(s): "
