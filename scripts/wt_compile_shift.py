@@ -274,7 +274,7 @@ def main():
                     "_Accepted/organized meetings with other attendees (declined, "
                     "solo, all-day, focus/OOO blocks excluded). Attribute each to a "
                     "project by title / attendee domain; internal-only meetings with "
-                    "no clear project go under the day's general notes._\n\n"
+                    "no clear project go on the day's `Internal meetings:` line._\n\n"
                 )
                 for meeting in meetingList:
                     meetingStartLocal = meeting["start"].astimezone(userTimezone).strftime("%H:%M")
