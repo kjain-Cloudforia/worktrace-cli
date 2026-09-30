@@ -245,7 +245,9 @@ def fetchCalendarMeetings(startUtc: datetime, endUtc: datetime) -> Optional[list
     Raises on network/API errors — caller decides how to surface them.
 
     Never returned at all (not meetings): all-day entries, focus time / OOO /
-    working-location blocks, cancelled events, solo blocks with no other attendee.
+    working-location blocks, cancelled events. Events with no other attendee on
+    the invite count only when their title matches a project; otherwise they're
+    returned with excluded_reason "No other attendees on the invite".
     """
     accessToken = getAccessToken()
     if accessToken is None:
@@ -288,22 +290,25 @@ def fetchCalendarMeetings(startUtc: datetime, endUtc: datetime) -> Optional[list
         selfAttendee = next((attendee for attendee in attendeeList if attendee.get("self")), None)
         otherAttendeeList = [attendee for attendee in attendeeList
                              if not attendee.get("self") and not attendee.get("resource")]
-        if not otherAttendeeList:
-            continue  # solo block, not a meeting
         responseStatus = selfAttendee.get("responseStatus") if selfAttendee else "accepted"
 
         meetingTitle = calendarEvent.get("summary", "(no title)")
-        excludedReason = None
-        if any(keyword in meetingTitle.lower() for keyword in excludedTitleKeywordList):
-            excludedReason = "On your skip list"
-        elif responseStatus == "declined":
-            excludedReason = "Declined"
-
         eventStart = parseEventTime(calendarEvent["start"])
         eventEnd = parseEventTime(calendarEvent["end"])
         attendeeDomainSet = {attendee["email"].split("@")[-1].lower()
                              for attendee in otherAttendeeList if "@" in attendee.get("email", "")}
         meetingProject, projectReason = resolveMeetingProject(meetingTitle, attendeeDomainSet, configMap)
+
+        excludedReason = None
+        if any(keyword in meetingTitle.lower() for keyword in excludedTitleKeywordList):
+            excludedReason = "On your skip list"
+        elif responseStatus == "declined":
+            excludedReason = "Declined"
+        elif not otherAttendeeList and meetingProject == UNASSIGNED_PROJECT:
+            # No guests on the invite (e.g. "Kashish/Amrita" created without adding
+            # Amrita). Counts only when the title names a project; otherwise it's
+            # likely a personal block — shown greyed, kept out of the timesheet.
+            excludedReason = "No other attendees on the invite"
         meetingList.append({
             "event_id": calendarEvent.get("id", ""),
             "source": "google",
