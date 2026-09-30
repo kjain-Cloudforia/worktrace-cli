@@ -215,6 +215,16 @@ def main():
     sessionEventList = collectSessionEvents(startUtc, endUtc, config)
     cliEventList = collectCliEvents(startUtc, endUtc)
 
+    # Google Calendar meetings (optional — None when this laptop never ran
+    # `wt_calendar.py auth`; an API/network error must never block the compile).
+    meetingList, calendarError = None, None
+    try:
+        sys.path.insert(0, str(Path(__file__).parent))
+        from wt_calendar import fetchShiftMeetings
+        meetingList = fetchShiftMeetings(startUtc, endUtc)
+    except Exception as calendarException:
+        calendarError = f"{type(calendarException).__name__}: {calendarException}"
+
     EVIDENCE_DIR.mkdir(exist_ok=True)
     outputPath = EVIDENCE_DIR / f"{shiftDate}.md"
 
@@ -241,7 +251,9 @@ def main():
         outFh.write(
             f"**Sources:** {len(sessionEventList)} session user-messages, "
             f"{len(cliEventList)} tracked CLI commands across "
-            f"{len(allProjects)} project(s)\n\n"
+            f"{len(allProjects)} project(s)"
+            + (f", {len(meetingList)} calendar meeting(s)" if meetingList is not None else "")
+            + "\n\n"
         )
         outFh.write(
             "_When writing timesheet bullets from this evidence, each bullet "
@@ -251,8 +263,36 @@ def main():
         )
         outFh.write("---\n\n")
 
+        if meetingList is not None or calendarError:
+            outFh.write("## Meetings (Google Calendar)\n\n")
+            if calendarError:
+                outFh.write(f"_Calendar fetch failed — {calendarError[:200]}_\n\n")
+            elif not meetingList:
+                outFh.write("_(none)_\n\n")
+            else:
+                outFh.write(
+                    "_Accepted/organized meetings with other attendees (declined, "
+                    "solo, all-day, focus/OOO blocks and the user's skip list excluded). "
+                    "`→ Project` is auto-matched from title keywords / attendee domain. "
+                    "**UNASSIGNED meetings: ask the user which project each belongs to "
+                    "before writing bullets** (see Meetings rule in CLAUDE.shared.md)._\n\n"
+                )
+                for meeting in meetingList:
+                    meetingStartLocal = meeting["start"].astimezone(userTimezone).strftime("%H:%M")
+                    meetingEndLocal = meeting["end"].astimezone(userTimezone).strftime("%H:%M")
+                    responseNote = "" if meeting["response"] == "accepted" else f", RSVP: {meeting['response']}"
+                    organizerNote = ", organizer" if meeting["organizer_is_self"] else ""
+                    outFh.write(
+                        f"- **{meetingStartLocal}–{meetingEndLocal}** ({meeting['minutes']}m) "
+                        f"{meeting['title']} — {meeting['attendee_count']} other(s): "
+                        f"{', '.join(meeting['attendee_domains']) or 'n/a'}{organizerNote}{responseNote}"
+                        f" → **{meeting['project']}** ({meeting['project_reason']})"
+                        f"{' [recurring]' if meeting['recurring'] else ''}\n"
+                    )
+                outFh.write("\n")
+
         if not allProjects:
-            outFh.write("_No evidence in this shift window._\n")
+            outFh.write("_No session/CLI evidence in this shift window._\n")
 
         for projectName in allProjects:
             outFh.write(f"## Project: {projectName}\n\n")
@@ -287,6 +327,10 @@ def main():
         f"  Sessions: {len(sessionEventList)} user-msgs | CLI: {len(cliEventList)} events "
         f"| Projects: {', '.join(allProjects) if allProjects else '(none)'}"
     )
+    if calendarError:
+        print(f"  ⚠ Calendar fetch failed: {calendarError[:200]}")
+    elif meetingList is not None:
+        print(f"  Calendar: {len(meetingList)} meeting(s)")
 
 
 if __name__ == "__main__":
