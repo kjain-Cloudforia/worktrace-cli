@@ -168,6 +168,8 @@ Meetings from your Google Calendar can be added to each shift's evidence automat
 
 Meetings are auto-matched to a project by title (project name or your keywords) or client attendee domain; unmatched ones are asked about at timesheet sync, and recurring answers are remembered. Manage it with `wt_calendar.py map "<title keyword>" <Project|Internal>`, `map-domain <client.com> <Project>`, `skip "<title keyword>"` (stored in your local `config.json` → `modules.timesheet.calendar`).
 
+To keep the dashboard Calendar fresh every 30 min while your laptop is on: `python3 ~/Documents/DevPlatform/scripts/wt_calendar_autosync.py install` → click **Allow** on the "WorkTrace Calendar Sync … Documents folder" prompt (Documents-only access, no Full Disk Access). `status` / `uninstall` to check or remove.
+
 No billing account needed. `.secrets/` is gitignored. Skip this and nothing changes — the evidence compile just omits the Meetings section.
 
 ---
