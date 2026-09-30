@@ -48,3 +48,7 @@ backups/
 __pycache__/
 *.pyc
 *.pyo
+
+# ---- Per-user OAuth credentials + tokens (Google Calendar etc.) ----
+# chmod 700 folder. NEVER commit.
+.secrets/

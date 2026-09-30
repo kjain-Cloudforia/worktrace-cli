@@ -156,6 +156,18 @@ Click **Change password** in the top-right header. Enter:
 
 You're done. From now on, every time you open Claude Code on your laptop and start a new conversation, the auto-sync routine runs once per work-day to pull the latest rules and push your timesheet.
 
+### Optional — log calendar meetings in your timesheet (~10 min, free)
+
+Meetings from your Google Calendar can be added to each shift's evidence automatically. Workspace admins usually disable the "secret iCal address", so this uses a read-only Google Calendar API login:
+
+1. [console.cloud.google.com](https://console.cloud.google.com) (work account) → create a project → **APIs & Services → Library → Google Calendar API → Enable**.
+2. **Google Auth Platform → Audience: Internal** (otherwise consent expires every 7 days).
+3. **Clients → Create client → Desktop app** → **Download JSON** → save as `~/Documents/DevPlatform/.secrets/google_client.json` (in Finder: Cmd+Shift+G to reach the hidden `.secrets` folder; create it first with `mkdir -m 700 ~/Documents/DevPlatform/.secrets`).
+4. `python3 ~/Documents/DevPlatform/scripts/wt_calendar.py auth` → approve in the browser.
+5. Check: `python3 ~/Documents/DevPlatform/scripts/wt_calendar.py list <YYYY-MM-DD>`.
+
+No billing account needed. `.secrets/` is gitignored. Skip this and nothing changes — the evidence compile just omits the Meetings section.
+
 ---
 
 ## What the script actually does (for the curious / for troubleshooting)
