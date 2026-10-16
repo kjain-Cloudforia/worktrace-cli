@@ -16,7 +16,8 @@ one-off meetings the user assigned by hand show under the right project.
 
 Every entry carries a status:
     logged    — in the timesheet; `project` is where it was logged
-    excluded  — declined, or on the user's skip list (`reason` says which)
+    excluded  — declined, on the user's skip list, or on a leave day
+                (`reason` says which)
     missing   — the work day is logged but this meeting isn't on it
     pending   — the work day isn't logged yet (current shift); `project` is
                 the auto-matched suggestion or null
@@ -72,14 +73,17 @@ def workDateOf(meetingStartUtc: datetime, userTimezone: ZoneInfo, shiftEndHourMi
 
 
 def buildLoggedMeetingIndex(timesheetText: str):
-    """Return (loggedWorkDateSet, workDateVsMeetingBulletListMap).
+    """Return (loggedWorkDateSet, workDateVsMeetingBulletListMap, leaveWorkDateSet).
 
     Each meeting bullet is (normalizedBulletText, projectFriendlyName)."""
     loggedWorkDateSet = set()
+    leaveWorkDateSet = set()
     workDateVsMeetingBulletListMap = {}
     for timesheetEntry in parse_timesheet(timesheetText):
         workDate = timesheetEntry["work_date"]
         loggedWorkDateSet.add(workDate)
+        if timesheetEntry.get("on_leave"):
+            leaveWorkDateSet.add(workDate)
         projectMap = timesheetEntry.get("project") or {}
         sectionProject = projectMap.get("friendly_name") or projectMap.get("company_name")
         for bulletText in timesheetEntry.get("bullets", []):
@@ -89,7 +93,7 @@ def buildLoggedMeetingIndex(timesheetText: str):
             bulletProject = INTERNAL_PROJECT if bulletMatch.group(1) else sectionProject
             workDateVsMeetingBulletListMap.setdefault(workDate, []).append(
                 (normalizeTitle(bulletText), bulletProject))
-    return loggedWorkDateSet, workDateVsMeetingBulletListMap
+    return loggedWorkDateSet, workDateVsMeetingBulletListMap, leaveWorkDateSet
 
 
 def buildPayload(configMap: dict, meetingList: list, timesheetText: str,
@@ -101,7 +105,7 @@ def buildPayload(configMap: dict, meetingList: list, timesheetText: str,
     shiftEndHourMinute = tuple(map(int, workHoursMap["end"].split(":")))
     crossesMidnight = shiftEndHourMinute < shiftStartHourMinute
 
-    loggedWorkDateSet, workDateVsMeetingBulletListMap = buildLoggedMeetingIndex(timesheetText)
+    loggedWorkDateSet, workDateVsMeetingBulletListMap, leaveWorkDateSet = buildLoggedMeetingIndex(timesheetText)
 
     entryList = []
     for meeting in meetingList:
@@ -119,6 +123,8 @@ def buildPayload(configMap: dict, meetingList: list, timesheetText: str,
             meetingStatus, statusReason, meetingProject = "logged", None, loggedProject
         elif meeting["excluded_reason"]:
             meetingStatus, statusReason, meetingProject = "excluded", meeting["excluded_reason"], suggestedProject
+        elif workDate in leaveWorkDateSet:
+            meetingStatus, statusReason, meetingProject = "excluded", "On leave this day", suggestedProject
         elif workDate in loggedWorkDateSet and meeting.get("source") == "manual":
             meetingStatus, meetingProject = "missing", suggestedProject
             statusReason = "Added after this day was logged — goes in at the next timesheet sync"
@@ -160,6 +166,7 @@ def buildPayload(configMap: dict, meetingList: list, timesheetText: str,
         "projects": knownProjectList(configMap),
         "range": {"start_date": rangeStartDate,
                   "end": rangeEndUtc.strftime("%Y-%m-%dT%H:%M:%SZ")},
+        "leave_dates": sorted(leaveWorkDateSet),
         "entries": entryList,
     }
 

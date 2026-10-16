@@ -175,6 +175,25 @@ def build_payload(config: dict, content: str) -> dict:
     parsed = parse_timesheet(content)
     entries = []
     for pe in parsed:
+        # No-work weekday: emit a minimal entry (no project / bullets) so the
+        # dashboard still renders the day as "No work done".
+        # Leave days are no_work entries flagged on_leave ("On leave").
+        if pe.get("no_work"):
+            no_work_headline = "On leave" if pe.get("on_leave") else "No work done"
+            entry = {
+                "work_date": pe["work_date"],
+                "project":   None,
+                "headline":  no_work_headline,
+                "bullets":   [],
+                "counts":    {},
+                "tags":      [],
+                "no_work":   True,
+                "on_leave":  bool(pe.get("on_leave")),
+            }
+            entry["entry_hash"] = entry_hash(pe["work_date"], "", no_work_headline)
+            entries.append(entry)
+            continue
+
         bullets = pe["bullets"]
         project = pe["project"]
         # Schema requires `company_name`; `friendly_name` is optional.

@@ -66,6 +66,17 @@ RE_TOP_BULLET = re.compile(r"^-\s+(.*)")
 # Week header (informational only — we use day header for the actual date)
 RE_WEEK = re.compile(r"^##\s+Week\s+of\s+(\d{4}-\d{2}-\d{2})", re.IGNORECASE)
 
+# "No work done." marker — a weekday with no logged work. Emitted as a
+# no_work entry so the dashboard still shows the day. Weekends carry no marker
+# (left blank by convention), so they stay hidden. Tolerates the italic
+# asterisks and an optional trailing period.
+RE_NO_WORK = re.compile(r"^\*?\s*No work done\.?\s*\*?$", re.IGNORECASE)
+
+# "On leave." marker — the user was on leave that work day. Emitted as a
+# no_work entry with on_leave=True, so the Timesheet shows "On leave" and the
+# Calendar marks the day.
+RE_ON_LEAVE = re.compile(r"^\*?\s*On leave\.?\s*\*?$", re.IGNORECASE)
+
 
 def parse_timesheet(content: str) -> List[Dict]:
     """
@@ -80,6 +91,7 @@ def parse_timesheet(content: str) -> List[Dict]:
     sort should sort the result.
     """
     entries: List[Dict] = []
+    no_work_dates_emitted = set()
 
     current_day: Optional[str] = None
     current_project: Optional[Dict[str, Optional[str]]] = None
@@ -132,6 +144,25 @@ def parse_timesheet(content: str) -> List[Dict]:
                 "company_name": m.group(1).strip(),
                 "friendly_name": m.group(2).strip() if m.group(2) else None,
             }
+            continue
+
+        # *No work done.* — a weekday with no logged work. Emit a no_work
+        # entry (no project, no bullets) so the day still shows on the
+        # dashboard. Weekends carry no marker, so they stay hidden.
+        # *On leave.* works the same way, with on_leave=True.
+        is_on_leave = bool(RE_ON_LEAVE.match(line.strip()))
+        if (current_day
+                and current_day not in no_work_dates_emitted
+                and (is_on_leave or RE_NO_WORK.match(line.strip()))):
+            flush_entry()
+            entries.append({
+                "work_date": current_day,
+                "project": None,
+                "bullets": [],
+                "no_work": True,
+                "on_leave": is_on_leave,
+            })
+            no_work_dates_emitted.add(current_day)
             continue
 
         # Horizontal rule — flush current bullet (but don't close entry yet,
@@ -204,6 +235,43 @@ def _self_test():
     assert "First sub-bullet" in result[0]["bullets"][1]
     assert result[1]["project"]["friendly_name"] is None  # no parens
     assert result[2]["work_date"] == "2026-05-12"
+
+    # No-work-day handling: a weekday with only the "*No work done.*" marker
+    # should emit a single no_work entry (no project, no bullets); a day with
+    # real work should not.
+    no_work_sample = """\
+## Week of 2026-05-25
+
+### Day 17 — Wed 2026-05-27 (14:00 IST) → Thu 2026-05-28 (05:00 IST)
+
+*No work done.*
+
+### Day 18 — Thu 2026-05-28 (14:00 IST) → Fri 2026-05-29 (05:00 IST)
+
+**Project: Acme, LLC (Acme)**
+
+- **Did a thing.**
+"""
+    nw = parse_timesheet(no_work_sample)
+    no_work_entries = [e for e in nw if e.get("no_work")]
+    assert len(no_work_entries) == 1, f"expected 1 no_work entry, got {len(no_work_entries)}"
+    assert no_work_entries[0]["work_date"] == "2026-05-27"
+    assert no_work_entries[0]["project"] is None
+    assert no_work_entries[0]["bullets"] == []
+    # The working day still parses normally.
+    assert any(e["work_date"] == "2026-05-28" and not e.get("no_work") for e in nw)
+    assert no_work_entries[0]["on_leave"] is False
+
+    # Leave day: "*On leave.*" emits a no_work entry flagged on_leave.
+    leave_sample = """\
+### Day 19 — Fri 2026-05-29 (14:00 IST) → Sat 2026-05-30 (05:00 IST)
+
+*On leave.*
+"""
+    leave_entries = parse_timesheet(leave_sample)
+    assert len(leave_entries) == 1
+    assert leave_entries[0]["no_work"] is True and leave_entries[0]["on_leave"] is True
+
     print("\n✓ self-test passed")
 
 
