@@ -19,6 +19,8 @@ Usage:
     python3 wt_tasks.py edit GEN-12 [--title "..."] [--desc "..."]
     python3 wt_tasks.py delete GEN-12
     python3 wt_tasks.py seed                            # one board per config.json project + Internal
+    python3 wt_tasks.py add-board "Name" [--key ABC]    # board for a project not in config.json
+    python3 wt_tasks.py import tasks.json               # bulk add, one write, skips duplicate titles
     python3 wt_tasks.py summary                         # one-line-per-board open counts (shift notice)
 
 A board can be named by key (GEN), name (Genserve) or project, any case.
@@ -403,6 +405,69 @@ def command_seed(config: dict, _arguments):
         print(f"Created board {board['name']} ({board['key']})")
 
 
+def command_add_board(config: dict, arguments):
+    def mutation(dataModel):
+        boardName = arguments.name.strip()
+        existingBoard = next((board for board in dataModel["boards"] if board["name"].lower() == boardName.lower()), None)
+        if existingBoard:
+            return existingBoard, False
+        takenKeySet = {board["key"] for board in dataModel["boards"]}
+        boardKey = (arguments.key or "").upper() or suggest_board_key(boardName, takenKeySet)
+        if not re.fullmatch(r"[A-Z][A-Z0-9]{1,5}", boardKey) or boardKey in takenKeySet:
+            raise TaskBoardError(f"Key '{boardKey}' is invalid or already used.")
+        newBoard = {
+            "id": make_id("brd"), "name": boardName, "key": boardKey, "project": None,
+            "source": "manual", "archived": False, "created_at": now_iso(),
+            "columns": default_column_list(), "next_task_number": 1, "tasks": [],
+        }
+        dataModel["boards"].append(newBoard)
+        return newBoard, True
+
+    board, wasCreated = apply_and_save(config, mutation, f"Add board \"{arguments.name}\"")
+    print(f"{'Created' if wasCreated else 'Already exists:'} board {board['name']} ({board['key']})")
+
+
+def command_import(config: dict, arguments):
+    """Bulk-add tasks from a JSON list in ONE write. Each item:
+    {"board", "title", "desc"?, "column"?, "completed_on"? (YYYY-MM-DD)}.
+    A title already on that board (any case) is skipped, so re-running is safe."""
+    importItemList = json.loads(Path(arguments.file).read_text())
+    preparedItemList = [dict(importItem, task_id=make_id("tsk")) for importItem in importItemList]
+
+    def mutation(dataModel):
+        addedCount, skippedTitleList = 0, []
+        for importItem in preparedItemList:
+            board = resolve_board(dataModel, importItem["board"])
+            if any(task["title"].lower() == importItem["title"].strip().lower() for task in board["tasks"]):
+                skippedTitleList.append(f"{board['key']}: {importItem['title']}")
+                continue
+            targetColumn = resolve_column(board, importItem["column"]) if importItem.get("column") else board["columns"][0]
+            timestamp = now_iso()
+            newTask = {
+                "id": importItem["task_id"],
+                "key": f"{board['key']}-{board['next_task_number']}",
+                "title": importItem["title"].strip(),
+                "description": (importItem.get("desc") or "").strip(),
+                "column_id": targetColumn["id"],
+                "created_at": timestamp,
+                "updated_at": timestamp,
+                "created_by": "claude",
+            }
+            if targetColumn.get("is_done"):
+                completedOn = importItem.get("completed_on")
+                newTask["completed_at"] = f"{completedOn}T12:00:00.000Z" if completedOn else timestamp
+            board["next_task_number"] += 1
+            board["tasks"].append(newTask)
+            addedCount += 1
+        return addedCount, skippedTitleList
+
+    addedCount, skippedTitleList = apply_and_save(
+        config, mutation, f"Import {len(preparedItemList)} task(s) from {Path(arguments.file).name}")
+    print(f"Imported {addedCount} task(s); skipped {len(skippedTitleList)} already on their board.")
+    for skippedTitle in skippedTitleList:
+        print(f"  skipped {skippedTitle}")
+
+
 def command_summary(config: dict, _arguments):
     """Compact open-task digest for the shift-start notice. Silent when empty."""
     dataModel, _ = read_board_file(config)
@@ -445,6 +510,11 @@ def main() -> int:
     deleteParser = subparsers.add_parser("delete", help="Delete a task")
     deleteParser.add_argument("task")
     subparsers.add_parser("seed", help="Create a board per config.json project + Internal")
+    addBoardParser = subparsers.add_parser("add-board", help="Create a board by hand")
+    addBoardParser.add_argument("name")
+    addBoardParser.add_argument("--key")
+    importParser = subparsers.add_parser("import", help="Bulk-add tasks from a JSON file (one write)")
+    importParser.add_argument("file")
     subparsers.add_parser("summary", help="Open-task digest (shift-start notice)")
 
     arguments = parser.parse_args()
@@ -452,6 +522,7 @@ def main() -> int:
         "list": command_list, "show": command_show, "boards": command_boards, "add": command_add,
         "move": command_move, "edit": command_edit, "delete": command_delete,
         "seed": command_seed, "summary": command_summary,
+        "add-board": command_add_board, "import": command_import,
     }
     try:
         commandVsHandlerMap[arguments.command](load_config(), arguments)
