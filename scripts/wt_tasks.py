@@ -14,7 +14,7 @@ Usage:
     python3 wt_tasks.py list [--board GEN] [--all]      # open tasks (all = include done)
     python3 wt_tasks.py show GEN-12
     python3 wt_tasks.py boards                          # boards + their columns
-    python3 wt_tasks.py add GEN "Title" [--desc "..."] [--column "In Progress"]
+    python3 wt_tasks.py add GEN "Title" [--desc "..."] [--column "Dev In Progress"]
     python3 wt_tasks.py move GEN-12 "Done"              # column name (case-insensitive) or "done"
     python3 wt_tasks.py edit GEN-12 [--title "..."] [--desc "..."]
     python3 wt_tasks.py delete GEN-12
@@ -154,8 +154,12 @@ def make_id(prefix: str) -> str:
 def default_column_list() -> list:
     return [
         {"id": "col_todo", "name": "To Do"},
-        {"id": "col_inprogress", "name": "In Progress"},
-        {"id": "col_blocked", "name": "Blocked"},
+        {"id": "col_dev", "name": "Dev In Progress"},
+        {"id": "col_qa", "name": "QA In Progress"},
+        {"id": "col_waiting", "name": "Waiting for Client"},
+        {"id": "col_ready", "name": "Ready to Deploy"},
+        {"id": "col_prod", "name": "Prod Deployed"},
+        {"id": "col_prodtest", "name": "Prod Testing"},
         {"id": "col_done", "name": "Done", "is_done": True},
     ]
 

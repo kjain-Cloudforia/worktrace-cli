@@ -228,7 +228,11 @@ The dashboard's **Task Board** module keeps one board per project (seeded from `
 - **Always go through the CLI:** `python3 ~/Documents/DevPlatform/scripts/wt_tasks.py <list|show|boards|add|move|edit|delete|seed|summary>`. Never hand-edit `sync/modules/tasks/data.json` or the GitHub file — the CLI does a compare-and-swap write so a dashboard edit made at the same moment isn't lost.
 - **Adding:** when the user says "add a task…", "put X on my board", "remind me to…" (board context), run `add <board> "<title>" [--desc "..."] [--column "..."]`. Pick the board by the same project attribution as the timesheet; if it's unclear, ask. Short action-style title; details/links go in `--desc`.
 - **Reading:** "what's on my board / my tasks / what's open" → `list` (add `--board X` or `--all` as asked).
-- **Moving:** when work that clearly matches an open task lands (same bar as the timesheet inclusion test — deployed / actually finished), move it to the board's done column and tell the user in one line ("Moved GEN-4 → Done"). Starting work on a task the user names by key → move it to In Progress. If it's unclear whether the work matches or is fully finished, ask instead of moving.
+- **Moving:** default columns follow the delivery lifecycle — To Do → Dev In Progress → QA In Progress → Waiting for Client → Ready to Deploy → Prod Deployed → Prod Testing → Done. Move a matching task as its work clearly reaches a stage, and tell the user in one line ("Moved GEN-4 → Prod Deployed"):
+  - started building → **Dev In Progress**; deployed to a sandbox/preprod for testing → **QA In Progress**
+  - waiting on a client answer/approval → **Waiting for Client**; approved or validated, only the prod deploy left → **Ready to Deploy**
+  - deployed to prod → **Prod Deployed**; being verified in prod (by us or the client) → **Prod Testing**; verified/closed → **Done**
+  - A board may have custom columns — use `boards` to see them and pick the closest. If it's unclear whether the work matches or reached that stage, ask instead of moving.
 - **Never** delete tasks, archive boards or change columns unless asked.
 - **Shift start:** the shift-start notice lists open tasks per board (`🗂`) — mention them briefly, don't dump the whole board.
 - New project added to `config.json` → run `wt_tasks.py seed` to give it a board.
