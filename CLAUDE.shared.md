@@ -221,6 +221,19 @@ PY
 - If nothing printed, proceed silently. No "checked, nothing to do" noise.
 - Don't run the sync if the user explicitly asks for something destructive (force-push, file deletion, etc.) — defer to next session.
 
+## Task Board (Jira-style boards, one per project)
+
+The dashboard's **Task Board** module keeps one board per project (seeded from `config.json` projects + `Internal`; more can be made by hand), each with its own status columns. Tasks carry keys like `GEN-12`. Data lives at `modules/tasks/data.json` in the user's data repo.
+
+- **Always go through the CLI:** `python3 ~/Documents/DevPlatform/scripts/wt_tasks.py <list|show|boards|add|move|edit|delete|seed|summary>`. Never hand-edit `sync/modules/tasks/data.json` or the GitHub file — the CLI does a compare-and-swap write so a dashboard edit made at the same moment isn't lost.
+- **Adding:** when the user says "add a task…", "put X on my board", "remind me to…" (board context), run `add <board> "<title>" [--desc "..."] [--column "..."]`. Pick the board by the same project attribution as the timesheet; if it's unclear, ask. Short action-style title; details/links go in `--desc`.
+- **Reading:** "what's on my board / my tasks / what's open" → `list` (add `--board X` or `--all` as asked).
+- **Moving:** when work that clearly matches an open task lands (same bar as the timesheet inclusion test — deployed / actually finished), move it to the board's done column and tell the user in one line ("Moved GEN-4 → Done"). Starting work on a task the user names by key → move it to In Progress. If it's unclear whether the work matches or is fully finished, ask instead of moving.
+- **Never** delete tasks, archive boards or change columns unless asked.
+- **Shift start:** the shift-start notice lists open tasks per board (`🗂`) — mention them briefly, don't dump the whole board.
+- New project added to `config.json` → run `wt_tasks.py seed` to give it a board.
+- Task Board edits are planning, not deliverables — never a timesheet bullet on their own.
+
 ## Project trigger phrases (WorkTrace-platform-related only)
 
 When the user says one of these phrases (alone or as the opener of a message), load `~/Documents/DevPlatform/PROJECT_NOTES.md` and pick up from its "Open items" section.
