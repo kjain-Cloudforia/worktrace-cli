@@ -225,6 +225,25 @@ def main() -> None:
             )
             statusLines.extend(f"  • {line}" for line in unloggedLineList)
 
+    # Task Board digest — open tasks per board, so the shift starts with them in view.
+    taskBoardScriptPath = DP / "scripts" / "wt_tasks.py"
+    if taskBoardScriptPath.exists():
+        try:
+            summaryResult = subprocess.run(
+                ["python3", str(taskBoardScriptPath), "summary"],
+                capture_output=True, text=True, timeout=30,
+            )
+            boardSummaryLineList = [line for line in summaryResult.stdout.splitlines() if line.strip()]
+        except Exception:
+            boardSummaryLineList = []
+        if boardSummaryLineList:
+            statusLines.append("")
+            statusLines.append(
+                "🗂 Open tasks on the Task Board (mention these briefly to the user; "
+                "`python3 ~/Documents/DevPlatform/scripts/wt_tasks.py list` for detail):"
+            )
+            statusLines.extend(f"  • {line}" for line in boardSummaryLineList)
+
     print("\n".join(statusLines))
 
 

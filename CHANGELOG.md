@@ -6,6 +6,25 @@ For **current state** (open items, what's still pending), see [`~/Documents/DevP
 
 ---
 
+## Phase 8 — Task Board module (Oct 2026)
+
+**Scope:** a Jira-style task board on the dashboard — one board per project, tasks moved across status columns — that Claude can read and write too.
+
+**What shipped:**
+- `app/docs/modules/tasks/` — tile (open-task total + per-board chips) and detail view: board tabs, columns of draggable cards, inline "+ Add task" composer (Enter adds, stays open), task modal (title, description, status, board, delete), board settings (rename, add/rename/reorder/remove columns, mark columns as Done, archive, delete), new-board modal with an auto-suggested key.
+- `app/docs/schema/tasks/v1.json` — data contract for `modules/tasks/data.json`.
+- `shell.js` — `fetchMyData({ fresh: true })` (no-store + cache buster) for read-before-write.
+- `scripts/wt_tasks.py` — CLI for Claude/terminal: list, show, boards, add, move, edit, delete, seed (one board per `config.json` project + Internal), summary.
+- `wt_shift_gate.py` — shift-start notice now lists open tasks per board.
+- `CLAUDE.shared.md` — Task Board rules (when Claude adds/moves tasks, never deletes unasked).
+
+**Design decisions:**
+- **Two writers, one file.** Unlike Tab Vault, the file is written by both the browser and a laptop script. The browser applies each edit locally, then re-reads the file fresh and re-applies the same id-based edit before saving; the CLI does a SHA compare-and-swap with retries. Neither side overwrites the other's changes.
+- **Task keys** (`GEN-12`) come from a per-board `next_task_number`, assigned when the write is applied, so concurrent adds never collide. Moving a task to another board gives it a new key.
+- **Done = a column flag** (`is_done`), not a fixed column name, so custom workflows still have a clear "finished" state for counts and `completed_at`.
+
+---
+
 ## Phase 5m — One-command teammate onboarding (May 2026)
 
 **Scope:** collapsed the new-teammate setup from a 7-step manual checklist (~20 min) to a single pasted command + 2 prompts (~3 min).

@@ -89,6 +89,22 @@ python3 ~/Documents/DevPlatform/scripts/sync_claude_md.py
 
 ---
 
+## `wt_tasks.py` (Phase 8, Task Board)
+
+Terminal / Claude access to the dashboard's Task Board (`modules/tasks/data.json` in your data repo). Talks to the GitHub contents API directly, with a SHA compare-and-swap on every write, so it never overwrites an edit made in the dashboard at the same time.
+
+```bash
+python3 wt_tasks.py list [--board GEN] [--all]
+python3 wt_tasks.py show GEN-12
+python3 wt_tasks.py boards
+python3 wt_tasks.py add GEN "Title" [--desc "..."] [--column "In Progress"]
+python3 wt_tasks.py move GEN-12 done          # column name, prefix, or "done"
+python3 wt_tasks.py edit GEN-12 --title "..." --desc "..."
+python3 wt_tasks.py delete GEN-12
+python3 wt_tasks.py seed                      # a board per config.json project + Internal
+python3 wt_tasks.py summary                   # used by the shift-start notice
+```
+
 ## `build_initial_user_records.py`
 
 **When to run:** exactly once, at project bootstrap. After that, the Admin Console handles new-user provisioning.
