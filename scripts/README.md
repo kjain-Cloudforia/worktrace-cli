@@ -102,6 +102,8 @@ python3 wt_tasks.py move GEN-12 done          # column name, prefix, or "done"
 python3 wt_tasks.py edit GEN-12 --title "..." --desc "..."
 python3 wt_tasks.py delete GEN-12
 python3 wt_tasks.py seed                      # a board per config.json project + Internal
+python3 wt_tasks.py add-board "Name" [--key ABC]   # board for a project not in config.json
+python3 wt_tasks.py import tasks.json         # bulk add [{board,title,desc?,column?,completed_on?}], one write, skips duplicate titles
 python3 wt_tasks.py summary                   # used by the shift-start notice
 ```
 
