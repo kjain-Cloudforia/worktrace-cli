@@ -178,8 +178,12 @@ def entry_hash(work_date: str, company_name: str, headline: str) -> str:
 
 
 def source_hash(content: str) -> str:
-    """Stable sha256 of the raw timesheet content (for no-op detection)."""
-    return "sha256:" + hashlib.sha256(content.encode("utf-8")).hexdigest()
+    """Stable sha256 of the raw timesheet content + this parser's own code (for
+    no-op detection) — so a parser fix (e.g. headline rules) re-publishes the
+    JSON even when timesheet.md itself didn't change."""
+    contentHasher = hashlib.sha256(content.encode("utf-8"))
+    contentHasher.update(Path(__file__).read_bytes())
+    return "sha256:" + contentHasher.hexdigest()
 
 
 # --- Payload assembly -----------------------------------------------------
