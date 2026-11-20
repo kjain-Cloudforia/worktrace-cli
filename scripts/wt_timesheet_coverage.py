@@ -158,7 +158,9 @@ def main():
         dateLabel = shiftDate.isoformat()
 
         evidencePath = EVIDENCE_DIR / f"{dateLabel}.md"
-        if not parsedArguments.no_compile and COMPILER.exists():
+        evidenceIsFinal = evidencePath.exists() and datetime.fromtimestamp(
+            evidencePath.stat().st_mtime, tz_mod.utc) >= shiftEndLocal.astimezone(tz_mod.utc)
+        if not parsedArguments.no_compile and not evidenceIsFinal and COMPILER.exists():
             subprocess.run(["python3", str(COMPILER), dateLabel], capture_output=True, text=True, timeout=60)
         evidenceText = evidencePath.read_text() if evidencePath.exists() else ""
         projectNameVsSubstantiveCountMap, projectNameVsCliCountMap, meetingList = parseEvidence(evidenceText)
