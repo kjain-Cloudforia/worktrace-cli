@@ -121,6 +121,11 @@ The current shift hasn't ended yet, so it can't be "reconstructed" in the same w
 - Bullets are added incrementally during the shift as work lands.
 - When the shift ends (5:00 IST for default config), the next shift's first-prompt hook fires, compiles evidence for the now-completed shift (yesterday's), and the `*(in progress)*` marker is removed by the LLM when it appends the next bullet.
 - This means an in-progress shift's bullets can be edited freely during the shift — they only "lock in" when the shift closes and the hook moves to the next.
+- **A partial in-progress day is not a reconstructed day.** When the shift closes, rebuild it from the full evidence across **all** projects. Earlier bullets usually come from one session/project only.
+
+### Coverage audit (`🔍 Timesheet coverage gaps`)
+
+The shift-start hook also runs `scripts/wt_timesheet_coverage.py --days 7`. For every completed shift it re-compiles evidence and flags: a missing day, a leftover `*(in progress)*` marker, a project with real session messages / CLI events / commits but no `**Project:**` sub-header, and calendar meetings whose title isn't on that day. Treat each gap like a missing shift: read the evidence, add the bullets, then sync. `MEETINGS ONLY` days → ask the user (log / PTO / `wt_calendar.py skip`). Also run the script after any timesheet write, before `dpsync.py`, and fix what it prints. Trigger phrase **"Audit timesheet"** runs it on demand (`--days N`).
 
 ### Manual gate operations (for when something goes wrong)
 

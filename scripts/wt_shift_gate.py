@@ -205,6 +205,24 @@ def main() -> None:
             f"but compiler is not available."
         )
 
+    # Coverage audit — a day header existing doesn't mean the day is complete
+    # (a mid-shift *(in progress)* header from one session hid two projects on
+    # 2026-11-18). Re-checks every completed shift of the last 7 days for missing
+    # projects / meetings / leftover in-progress markers, regardless of the marker.
+    coverageScriptPath = DP / "scripts" / "wt_timesheet_coverage.py"
+    if coverageScriptPath.exists():
+        try:
+            coverageResult = subprocess.run(
+                ["python3", str(coverageScriptPath), "--days", "7"],
+                capture_output=True, text=True, timeout=150,
+            )
+            coverageLineList = [line for line in coverageResult.stdout.splitlines() if line.strip()]
+        except Exception:
+            coverageLineList = []
+        if coverageLineList:
+            statusLines.append("")
+            statusLines.extend(coverageLineList)
+
     # Dashboard-added meetings (Calendar module → manual.json) whose work day is
     # already logged but that aren't on it yet. dpsync above pulled manual.json.
     calendarSyncPath = DP / "modules" / "calendar" / "sync.py"
