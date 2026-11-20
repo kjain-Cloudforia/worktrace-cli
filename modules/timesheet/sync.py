@@ -91,14 +91,31 @@ def first_sentence(text: str) -> str:
     """Pull the first sentence out of a bullet's text, markdown-stripped."""
     text = text.strip()
     text = _strip_md_bold(text)
-    # Match up to and including the first ., !, or ? that's followed by whitespace
-    # or end-of-string. Avoid stopping on abbreviations by also requiring a
-    # capital letter or end-of-string after the punctuation (best-effort).
-    match = re.search(r"^(.+?[.?!])(\s|$)", text, re.DOTALL)
-    if match:
-        return match.group(1).strip()
+    # Stop at the first ., !, or ? followed by whitespace/end-of-string — but not
+    # on abbreviations ("St. Mary", "Dr.", "e.g."), single-letter initials, or a
+    # full stop followed by a lowercase word. A cut at "Trinity Health (St." made
+    # the dashboard headline look like text went missing (2026-11-18).
+    for terminatorMatch in re.finditer(r"[.?!](?=\s|$)", text):
+        terminatorIndex = terminatorMatch.start()
+        if text[terminatorIndex] == ".":
+            precedingWordMatch = re.search(r"([A-Za-z.'’]+)$", text[:terminatorIndex])
+            precedingWord = precedingWordMatch.group(1).lower() if precedingWordMatch else ""
+            if precedingWord in ABBREVIATION_SET or re.fullmatch(r"[a-z]", precedingWord) \
+                    or re.fullmatch(r"(?:[a-z]\.)+[a-z]", precedingWord):
+                continue
+            followingTextMatch = re.match(r"\s+(\S)", text[terminatorIndex + 1:])
+            if followingTextMatch and followingTextMatch.group(1).islower():
+                continue
+        return text[:terminatorIndex + 1].strip()
     # No sentence terminator found — return the first chunk truncated.
     return text[:200].strip()
+
+
+ABBREVIATION_SET = {
+    "st", "mt", "ft", "dr", "mr", "mrs", "ms", "jr", "sr", "inc", "ltd", "co", "corp", "llc",
+    "no", "nos", "vs", "etc", "approx", "dept", "ave", "rd", "blvd", "jan", "feb", "mar", "apr",
+    "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec", "fig", "ref", "est", "min", "max",
+}
 
 
 def make_headline(bullets: list) -> str:
